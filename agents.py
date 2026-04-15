@@ -28,14 +28,9 @@ class BaseAgent:
                 model=self.model,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=2000,
-                timeout=120  # 增加超时时间
+                max_tokens=4000,  # 增加token限制
+                timeout=120
             )
-            
-            # 打印响应结构以便调试（生产环境可以注释掉）
-            import sys
-            print(f"[DEBUG] Response type: {type(response)}", file=sys.stderr)
-            print(f"[DEBUG] Response attributes: {dir(response)}", file=sys.stderr)
             
             # 检查响应是否存在
             if not response:
@@ -57,7 +52,6 @@ class BaseAgent:
             
             # 方式3: 检查是否有其他属性
             if content is None:
-                # 尝试获取其他可能的字段
                 if hasattr(response, 'data'):
                     content = str(response.data)
                 elif hasattr(response, 'text'):
@@ -66,9 +60,19 @@ class BaseAgent:
                     content = response.content
             
             if content is None:
-                raise Exception(f"无法解析API响应。响应类型: {type(response).__name__}, 属性: {dir(response)}")
+                raise Exception(f"无法解析API响应。响应类型: {type(response).__name__}")
             
-            return content.strip()
+            content = content.strip()
+            
+            # 检查是否返回了HTML错误页面（常见于API配置错误）
+            if content.startswith('<!DOCTYPE') or content.startswith('<html') or '<style>' in content[:500]:
+                raise Exception("API返回了HTML错误页面，请检查Base URL和API Key是否正确")
+            
+            # 检查是否包含明显的错误信息
+            if 'error' in content.lower() and len(content) < 500:
+                print(f"[WARNING] API可能返回错误信息: {content[:200]}")
+            
+            return content
             
         except Exception as e:
             # 返回详细的错误信息
@@ -94,46 +98,66 @@ class RequirementAnalyzer(BaseAgent):
 4. 不明确点：哪些地方描述不够清晰
 5. 依赖模块：需要哪些技术或业务支持
 
-请以JSON格式返回结果。"""
+请严格按照JSON格式返回结果，不要添加任何其他文字说明。"""
         
-        prompt = f"""请分析以下产品需求：
+        prompt = f"""请分析以下产品需求，并严格按照JSON格式返回：
 
+【产品需求】
 {raw_requirement}
 
-请以如下JSON格式返回：
+【返回格式】
 {{
-    "goal": "需求目标",
-    "users": "目标用户",
-    "core_features": "核心功能点（用分号分隔）",
-    "unclear_points": "不明确点（用分号分隔）",
-    "dependencies": "依赖模块（用分号分隔）"
-}}"""
+    "goal": "需求目标描述",
+    "users": "目标用户描述",
+    "core_features": "核心功能点1；核心功能点2；核心功能点3",
+    "unclear_points": "不明确点1；不明确点2",
+    "dependencies": "依赖模块1；依赖模块2"
+}}
+
+请确保所有字段都有值，如果没有明确信息，请根据需求合理推断。"""
         
         try:
             result_str = self.call_llm(prompt, system_prompt)
             
             # 检查是否返回了错误信息
             if result_str.startswith("❌"):
-                # 如果API调用失败，返回默认结构
-                return {
-                    "goal": raw_requirement[:100] if raw_requirement else "需求解析失败",
-                    "users": "未明确",
-                    "core_features": "待分析",
-                    "unclear_points": "需要进一步澄清",
-                    "dependencies": "待评估"
-                }
+                print(f"[ERROR] API返回错误: {result_str[:200]}")
+                return self._get_default_result(raw_requirement)
+            
+            # 打印原始响应（调试用）
+            print(f"[DEBUG] 原始API响应前200字符: {result_str[:200]}")
             
             # 尝试解析JSON
             import json
             try:
                 # 清理可能的代码块标记
-                result_str = result_str.strip()
-                if result_str.startswith("```"):
-                    result_str = result_str.split("\n", 1)[1]
-                if result_str.endswith("```"):
-                    result_str = result_str.rsplit("\n", 1)[0]
+                cleaned_str = result_str.strip()
                 
-                result_dict = json.loads(result_str)
+                # 移除可能的markdown代码块
+                if cleaned_str.startswith("```"):
+                    # 找到第一个换行后的内容
+                    lines = cleaned_str.split('\n')
+                    cleaned_str = '\n'.join(lines[1:])  # 跳过第一行 ```json
+                
+                if cleaned_str.endswith("```"):
+                    lines = cleaned_str.split('\n')
+                    cleaned_str = '\n'.join(lines[:-1])  # 移除最后一行 ```
+                
+                cleaned_str = cleaned_str.strip()
+                
+                # 尝试找到JSON对象的开始和结束
+                start_idx = cleaned_str.find('{')
+                end_idx = cleaned_str.rfind('}')
+                
+                if start_idx != -1 and end_idx != -1:
+                    json_str = cleaned_str[start_idx:end_idx+1]
+                else:
+                    json_str = cleaned_str
+                
+                print(f"[DEBUG] 清理后的JSON字符串前200字符: {json_str[:200]}")
+                
+                result_dict = json.loads(json_str)
+                print(f"[SUCCESS] JSON解析成功，字段: {list(result_dict.keys())}")
                 
                 return {
                     "goal": result_dict.get("goal", "未识别"),
@@ -145,7 +169,7 @@ class RequirementAnalyzer(BaseAgent):
             except (json.JSONDecodeError, AttributeError) as json_err:
                 # JSON解析失败，使用正则提取
                 print(f"[WARNING] JSON解析失败: {json_err}")
-                print(f"[DEBUG] 原始响应: {result_str[:500]}")
+                print(f"[DEBUG] 尝试使用正则提取...")
                 
                 result = {
                     "goal": self._extract_field(result_str, "goal"),
@@ -155,57 +179,69 @@ class RequirementAnalyzer(BaseAgent):
                     "dependencies": self._extract_field(result_str, "dependencies")
                 }
                 
+                # 记录提取结果
+                for key, value in result.items():
+                    if value != "未识别":
+                        print(f"[SUCCESS] 成功提取 {key}: {value[:50]}...")
+                
                 # 如果所有字段都是"未识别"，返回默认值
                 if all(v == "未识别" for v in result.values()):
-                    return {
-                        "goal": raw_requirement[:100] if raw_requirement else "需求解析失败",
-                        "users": "未明确",
-                        "core_features": "待分析",
-                        "unclear_points": "需要进一步澄清",
-                        "dependencies": "待评估"
-                    }
+                    print(f"[WARNING] 所有字段均未识别，使用默认值")
+                    return self._get_default_result(raw_requirement)
                 
                 return result
         except Exception as e:
             # 如果解析失败，返回基础结构
             print(f"[ERROR] analyze方法异常: {str(e)}")
-            return {
-                "goal": raw_requirement[:100] if raw_requirement else "需求解析失败",
-                "users": "未明确",
-                "core_features": "待分析",
-                "unclear_points": "需要进一步澄清",
-                "dependencies": "待评估"
-            }
+            import traceback
+            traceback.print_exc()
+            return self._get_default_result(raw_requirement)
+    
+    def _get_default_result(self, raw_requirement: str) -> Dict:
+        """返回默认的解析结果"""
+        return {
+            "goal": raw_requirement[:100] if raw_requirement else "需求解析失败",
+            "users": "未明确",
+            "core_features": "待分析",
+            "unclear_points": "需要进一步澄清",
+            "dependencies": "待评估"
+        }
     
     def _extract_field(self, text: str, field: str) -> str:
         """从文本中提取字段值（支持多种格式）"""
         import re
         
-        # 尝试1: JSON格式 "field": "value"
-        pattern1 = rf'"{field}"\s*:\s*"([^"]+)"'
-        match = re.search(pattern1, text)
-        if match:
-            return match.group(1)
-        
-        # 尝试2: 冒号格式 需求目标：value 或 需求目标:value
-        pattern2 = rf'{field}[：:]\s*"?([^"\n]+)"?'
-        match = re.search(pattern2, text)
-        if match:
-            return match.group(1).strip()
-        
-        # 尝试3: 中文字段名
-        field_map = {
-            "goal": r"需求目标[：:]\s*([^\n]+)",
-            "users": r"目标用户[：:]\s*([^\n]+)",
-            "core_features": r"核心功能[点：:][\s]*([^\n]+)",
-            "unclear_points": r"不明确[点：:][\s]*([^\n]+)",
-            "dependencies": r"依赖模块[：:]\s*([^\n]+)"
+        # 定义字段名映射（英文key -> 中文名称）
+        field_names = {
+            "goal": ["需求目标"],
+            "users": ["目标用户"],
+            "core_features": ["核心功能点", "核心功能"],
+            "unclear_points": ["不明确点", "不明确"],
+            "dependencies": ["依赖模块", "依赖"]
         }
         
-        if field in field_map:
-            match = re.search(field_map[field], text)
+        # 尝试1: JSON格式 "field": "value" 或 "中文名称": "value"
+        for name in [field] + field_names.get(field, []):
+            pattern = rf'"{name}"\s*:\s*"([^"]+)"'
+            match = re.search(pattern, text)
             if match:
                 return match.group(1).strip()
+        
+        # 尝试2: 中文名称：value 或 中文名称:value（支持多行）
+        for name in field_names.get(field, []):
+            # 匹配从名称到下一个字段或结尾的所有内容
+            pattern = rf'{name}[：:]\s*([^\n]+?)(?="\w+"[：:]|$)'
+            match = re.search(pattern, text)
+            if match:
+                result = match.group(1).strip().strip('"')
+                if result:
+                    return result
+        
+        # 尝试3: 英文field：value
+        pattern = rf'{field}[：:]\s*"?([^"\n]+)"?'
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
         
         return "未识别"
 
