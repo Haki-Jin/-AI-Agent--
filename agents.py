@@ -28,36 +28,55 @@ class BaseAgent:
                 model=self.model,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=2000
+                max_tokens=2000,
+                timeout=120  # 增加超时时间
             )
+            
+            # 打印响应结构以便调试（生产环境可以注释掉）
+            import sys
+            print(f"[DEBUG] Response type: {type(response)}", file=sys.stderr)
+            print(f"[DEBUG] Response attributes: {dir(response)}", file=sys.stderr)
             
             # 检查响应是否存在
             if not response:
                 raise Exception("API返回空响应")
             
-            # 检查choices是否存在
-            if not hasattr(response, 'choices') or not response.choices:
-                raise Exception("API响应中没有choices字段")
+            # 尝试多种方式获取响应内容，兼容不同API格式
+            content = None
             
-            # 检查第一个choice是否存在
-            if len(response.choices) == 0:
-                raise Exception("API响应中choices为空")
+            # 方式1: 标准OpenAI格式 response.choices[0].message.content
+            if hasattr(response, 'choices') and response.choices:
+                choice = response.choices[0]
+                if hasattr(choice, 'message') and choice.message:
+                    if hasattr(choice.message, 'content') and choice.message.content:
+                        content = choice.message.content
             
-            choice = response.choices[0]
+            # 方式2: 某些API可能直接返回字符串
+            if content is None and isinstance(response, str):
+                content = response
             
-            # 检查message是否存在
-            if not hasattr(choice, 'message') or choice.message is None:
-                raise Exception("API响应中没有message字段")
+            # 方式3: 检查是否有其他属性
+            if content is None:
+                # 尝试获取其他可能的字段
+                if hasattr(response, 'data'):
+                    content = str(response.data)
+                elif hasattr(response, 'text'):
+                    content = response.text
+                elif hasattr(response, 'content'):
+                    content = response.content
             
-            # 检查content是否存在
-            if not hasattr(choice.message, 'content') or choice.message.content is None:
-                raise Exception("API响应中没有content字段")
+            if content is None:
+                raise Exception(f"无法解析API响应。响应类型: {type(response).__name__}, 属性: {dir(response)}")
             
-            return choice.message.content.strip()
+            return content.strip()
             
         except Exception as e:
             # 返回详细的错误信息
-            error_msg = f"❌ API调用失败: {str(e)}\n\n请检查:\n1. API Key是否正确\n2. Base URL是否正确\n3. 模型名称是否正确\n4. 网络连接是否正常"
+            import traceback
+            error_detail = traceback.format_exc()
+            error_msg = f"❌ API调用失败: {str(e)}\n\n详细信息:\n{error_detail}\n\n请检查:\n1. API Key是否正确\n2. Base URL是否正确\n3. 模型名称是否正确\n4. 网络连接是否正常"
+            import sys
+            print(f"[ERROR] {error_msg}", file=sys.stderr)
             return error_msg
 
 
