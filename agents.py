@@ -18,18 +18,47 @@ class BaseAgent:
     
     def call_llm(self, prompt: str, system_prompt: str = "") -> str:
         """调用LLM生成回复"""
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=2000
-        )
-        return response.choices[0].message.content.strip()
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000
+            )
+            
+            # 检查响应是否存在
+            if not response:
+                raise Exception("API返回空响应")
+            
+            # 检查choices是否存在
+            if not hasattr(response, 'choices') or not response.choices:
+                raise Exception("API响应中没有choices字段")
+            
+            # 检查第一个choice是否存在
+            if len(response.choices) == 0:
+                raise Exception("API响应中choices为空")
+            
+            choice = response.choices[0]
+            
+            # 检查message是否存在
+            if not hasattr(choice, 'message') or choice.message is None:
+                raise Exception("API响应中没有message字段")
+            
+            # 检查content是否存在
+            if not hasattr(choice.message, 'content') or choice.message.content is None:
+                raise Exception("API响应中没有content字段")
+            
+            return choice.message.content.strip()
+            
+        except Exception as e:
+            # 返回详细的错误信息
+            error_msg = f"❌ API调用失败: {str(e)}\n\n请检查:\n1. API Key是否正确\n2. Base URL是否正确\n3. 模型名称是否正确\n4. 网络连接是否正常"
+            return error_msg
 
 
 class RequirementAnalyzer(BaseAgent):
