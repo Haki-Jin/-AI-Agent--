@@ -28,7 +28,7 @@ st.markdown("""
 
 # 侧边栏配置
 with st.sidebar:
-    st.header("⚙️ 配置")
+    st.header("⚙️ 配置/")
     
     # API配置
     api_provider = st.selectbox(
@@ -135,17 +135,17 @@ if st.button("🚀 开始需求转译", type="primary", use_container_width=True
         # 展示解析结果
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.info(f"**需求目标**\n\n{analysis_result.get('goal', 'N/A')}")
+            st.info(f"**需求目标**\n\n{format_output(analysis_result.get('goal', 'N/A'))}")
         with col2:
-            st.info(f"**目标用户**\n\n{analysis_result.get('users', 'N/A')}")
+            st.info(f"**目标用户**\n\n{format_output(analysis_result.get('users', 'N/A'))}")
         with col3:
-            st.info(f"**核心功能点**\n\n{analysis_result.get('core_features', 'N/A')}")
+            st.info(f"**核心功能点**\n\n{format_output(analysis_result.get('core_features', 'N/A'))}")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.warning(f"**不明确点**\n\n{analysis_result.get('unclear_points', '无明显不明确点')}")
+            st.warning(f"**不明确点**\n\n{format_output(analysis_result.get('unclear_points', '无明显不明确点'))}")
         with col2:
-            st.warning(f"**依赖模块**\n\n{analysis_result.get('dependencies', '无明显依赖')}")
+            st.warning(f"**依赖模块**\n\n{format_output(analysis_result.get('dependencies', '无明显依赖'))}")
         
         st.success("✅ 需求解析完成！")
         
@@ -212,50 +212,55 @@ if st.button("🚀 开始需求转译", type="primary", use_container_width=True
         
         with tab1:
             st.subheader("给研发的版本")
-            st.markdown(format_output(results['engineering']))
+            formatted_engineering = format_output(results['engineering'])
+            st.markdown(formatted_engineering)
             st.download_button(
                 label="📥 下载研发版本",
-                data=format_output(results['engineering']),
+                data=formatted_engineering,
                 file_name="engineering_requirement.md",
                 mime="text/markdown"
             )
         
         with tab2:
             st.subheader("给设计的版本")
-            st.markdown(format_output(results['design']))
+            formatted_design = format_output(results['design'])
+            st.markdown(formatted_design)
             st.download_button(
                 label="📥 下载设计版本",
-                data=format_output(results['design']),
+                data=formatted_design,
                 file_name="design_requirement.md",
                 mime="text/markdown"
             )
         
         with tab3:
             st.subheader("给算法/AI的版本")
-            st.markdown(format_output(results['ai']))
+            formatted_ai = format_output(results['ai'])
+            st.markdown(formatted_ai)
             st.download_button(
                 label="📥 下载算法/AI版本",
-                data=format_output(results['ai']),
+                data=formatted_ai,
                 file_name="ai_requirement.md",
                 mime="text/markdown"
             )
         
         with tab4:
             st.subheader("给测试的版本")
-            st.markdown(format_output(results['qa']))
+            formatted_qa = format_output(results['qa'])
+            st.markdown(formatted_qa)
             st.download_button(
                 label="📥 下载测试版本",
-                data=format_output(results['qa']),
+                data=formatted_qa,
                 file_name="qa_requirement.md",
                 mime="text/markdown"
             )
         
         with tab5:
             st.subheader("给运营/业务的版本")
-            st.markdown(format_output(results['operation']))
+            formatted_operation = format_output(results['operation'])
+            st.markdown(formatted_operation)
             st.download_button(
                 label="📥 下载运营/业务版本",
-                data=format_output(results['operation']),
+                data=formatted_operation,
                 file_name="operation_requirement.md",
                 mime="text/markdown"
             )

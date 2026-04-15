@@ -111,19 +111,66 @@ class RequirementAnalyzer(BaseAgent):
         
         try:
             result_str = self.call_llm(prompt, system_prompt)
-            # 简化的JSON解析（实际应该用json.loads）
-            result = {
-                "goal": self._extract_field(result_str, "goal"),
-                "users": self._extract_field(result_str, "users"),
-                "core_features": self._extract_field(result_str, "core_features"),
-                "unclear_points": self._extract_field(result_str, "unclear_points"),
-                "dependencies": self._extract_field(result_str, "dependencies")
-            }
-            return result
+            
+            # 检查是否返回了错误信息
+            if result_str.startswith("❌"):
+                # 如果API调用失败，返回默认结构
+                return {
+                    "goal": raw_requirement[:100] if raw_requirement else "需求解析失败",
+                    "users": "未明确",
+                    "core_features": "待分析",
+                    "unclear_points": "需要进一步澄清",
+                    "dependencies": "待评估"
+                }
+            
+            # 尝试解析JSON
+            import json
+            try:
+                # 清理可能的代码块标记
+                result_str = result_str.strip()
+                if result_str.startswith("```"):
+                    result_str = result_str.split("\n", 1)[1]
+                if result_str.endswith("```"):
+                    result_str = result_str.rsplit("\n", 1)[0]
+                
+                result_dict = json.loads(result_str)
+                
+                return {
+                    "goal": result_dict.get("goal", "未识别"),
+                    "users": result_dict.get("users", "未识别"),
+                    "core_features": result_dict.get("core_features", "未识别"),
+                    "unclear_points": result_dict.get("unclear_points", "未识别"),
+                    "dependencies": result_dict.get("dependencies", "未识别")
+                }
+            except (json.JSONDecodeError, AttributeError) as json_err:
+                # JSON解析失败，使用正则提取
+                print(f"[WARNING] JSON解析失败: {json_err}")
+                print(f"[DEBUG] 原始响应: {result_str[:500]}")
+                
+                result = {
+                    "goal": self._extract_field(result_str, "goal"),
+                    "users": self._extract_field(result_str, "users"),
+                    "core_features": self._extract_field(result_str, "core_features"),
+                    "unclear_points": self._extract_field(result_str, "unclear_points"),
+                    "dependencies": self._extract_field(result_str, "dependencies")
+                }
+                
+                # 如果所有字段都是"未识别"，返回默认值
+                if all(v == "未识别" for v in result.values()):
+                    return {
+                        "goal": raw_requirement[:100] if raw_requirement else "需求解析失败",
+                        "users": "未明确",
+                        "core_features": "待分析",
+                        "unclear_points": "需要进一步澄清",
+                        "dependencies": "待评估"
+                    }
+                
+                return result
         except Exception as e:
             # 如果解析失败，返回基础结构
+            print(f"[ERROR] analyze方法异常: {str(e)}")
             return {
-                "goal": raw_requirement[:100],
+                "goal": raw_requirement[:100] if raw_requirement else "需求解析失败",
                 "users": "未明确",
                 "core_features": "待分析",
                 "unclear_points": "需要进一步澄清",
@@ -131,12 +178,35 @@ class RequirementAnalyzer(BaseAgent):
             }
     
     def _extract_field(self, text: str, field: str) -> str:
-        """从文本中提取字段值（简化版）"""
+        """从文本中提取字段值（支持多种格式）"""
         import re
-        pattern = rf'"{field}"\s*:\s*"([^"]+)"'
-        match = re.search(pattern, text)
+        
+        # 尝试1: JSON格式 "field": "value"
+        pattern1 = rf'"{field}"\s*:\s*"([^"]+)"'
+        match = re.search(pattern1, text)
         if match:
             return match.group(1)
+        
+        # 尝试2: 冒号格式 需求目标：value 或 需求目标:value
+        pattern2 = rf'{field}[：:]\s*"?([^"\n]+)"?'
+        match = re.search(pattern2, text)
+        if match:
+            return match.group(1).strip()
+        
+        # 尝试3: 中文字段名
+        field_map = {
+            "goal": r"需求目标[：:]\s*([^\n]+)",
+            "users": r"目标用户[：:]\s*([^\n]+)",
+            "core_features": r"核心功能[点：:][\s]*([^\n]+)",
+            "unclear_points": r"不明确[点：:][\s]*([^\n]+)",
+            "dependencies": r"依赖模块[：:]\s*([^\n]+)"
+        }
+        
+        if field in field_map:
+            match = re.search(field_map[field], text)
+            if match:
+                return match.group(1).strip()
+        
         return "未识别"
 
 
