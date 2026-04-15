@@ -601,11 +601,11 @@ class RiskAnalyzer(BaseAgent):
 {analysis}
 
 【各部门转译结果摘要】
-- 研发版本：{results.get('engineering', '')[:500]}
-- 设计版本：{results.get('design', '')[:500]}
-- AI版本：{results.get('ai', '')[:500]}
-- 测试版本：{results.get('qa', '')[:500]}
-- 运营版本：{results.get('operation', '')[:500]}
+- 研发版本：{results.get('engineering', '')[:500] if results.get('engineering') else '未生成'}
+- 设计版本：{results.get('design', '')[:500] if results.get('design') else '未生成'}
+- AI版本：{results.get('ai', '')[:500] if results.get('ai') else '未生成'}
+- 测试版本：{results.get('qa', '')[:500] if results.get('qa') else '未生成'}
+- 运营版本：{results.get('operation', '')[:500] if results.get('operation') else '未生成'}
 
 请分析并回答以下问题：
 
@@ -649,18 +649,43 @@ class RiskAnalyzer(BaseAgent):
 
 请用清晰的列表形式输出以上内容。"""
         
-        result_text = self.call_llm(prompt, system_prompt)
-        
-        # 解析结果为结构化数据
-        return {
-            "unclear_expressions": self._extract_list(result_text, "表达不够明确的地方"),
-            "needs_supplement": self._extract_list(result_text, "需要产品经理补充的信息"),
-            "cross_dept_risks": self._extract_list(result_text, "跨部门理解偏差风险"),
-            "hidden_dependencies": self._extract_list(result_text, "隐性依赖和假设"),
-            "feasibility_risks": self._extract_list(result_text, "可行性风险"),
-            "next_steps": self._extract_list(result_text, "推荐的下一步动作"),
-            "raw_analysis": result_text
-        }
+        try:
+            result_text = self.call_llm(prompt, system_prompt)
+            
+            # 检查是否是错误信息
+            if result_text.startswith("❌"):
+                # 如果API调用失败，返回错误信息作为raw_analysis
+                return {
+                    "unclear_expressions": [],
+                    "needs_supplement": [],
+                    "cross_dept_risks": [],
+                    "hidden_dependencies": [],
+                    "feasibility_risks": [],
+                    "next_steps": [],
+                    "raw_analysis": result_text
+                }
+            
+            # 解析结果为结构化数据
+            return {
+                "unclear_expressions": self._extract_list(result_text, "表达不够明确的地方"),
+                "needs_supplement": self._extract_list(result_text, "需要产品经理补充的信息"),
+                "cross_dept_risks": self._extract_list(result_text, "跨部门理解偏差风险"),
+                "hidden_dependencies": self._extract_list(result_text, "隐性依赖和假设"),
+                "feasibility_risks": self._extract_list(result_text, "可行性风险"),
+                "next_steps": self._extract_list(result_text, "推荐的下一步动作"),
+                "raw_analysis": result_text
+            }
+        except Exception as e:
+            # 如果解析失败，返回基础结构
+            return {
+                "unclear_expressions": [],
+                "needs_supplement": [],
+                "cross_dept_risks": [],
+                "hidden_dependencies": [],
+                "feasibility_risks": [],
+                "next_steps": [],
+                "raw_analysis": f"风险分析失败: {str(e)}"
+            }
     
     def _extract_list(self, text: str, section_title: str) -> List[str]:
         """从文本中提取某个章节的列表项"""

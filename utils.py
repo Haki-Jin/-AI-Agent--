@@ -4,22 +4,26 @@
 
 
 def format_output(text) -> str:
-    """格式化输出文本，确保Markdown格式正确"""
+    """格式化输出文本，确俜Markdown格式正确"""
+    # 处理None或空值
+    if text is None:
+        return "暂无内容"
+    
     # 处理字典类型（如风险分析结果）
     if isinstance(text, dict):
         # 如果有raw_analysis字段，使用它
-        if 'raw_analysis' in text:
+        if 'raw_analysis' in text and text['raw_analysis']:
             text = text['raw_analysis']
         else:
             # 否则将字典转换为字符串
             import json
             text = json.dumps(text, ensure_ascii=False, indent=2)
     
-    # 处理None或空值
+    # 再次检查是否为空
     if not text:
         return "暂无内容"
     
-    # 确保是字符串类型
+    # 确俜是字符串类型
     if not isinstance(text, str):
         text = str(text)
     

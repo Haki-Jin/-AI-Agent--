@@ -263,29 +263,33 @@ if st.button("🚀 开始需求转译", type="primary", use_container_width=True
         with tab6:
             st.subheader("风险提醒与建议")
             
-            # 不明确表达
-            if results['risk'].get('unclear_expressions'):
-                st.error("❌ 表达不够明确的地方")
-                for item in results['risk']['unclear_expressions']:
-                    st.warning(f"- {item}")
-            
-            # 需要补充的信息
-            if results['risk'].get('needs_supplement'):
-                st.warning("⚠️ 需要产品经理补充的信息")
-                for item in results['risk']['needs_supplement']:
-                    st.info(f"- {item}")
-            
-            # 跨部门理解偏差风险
-            if results['risk'].get('cross_dept_risks'):
-                st.error("🔴 跨部门理解偏差风险")
-                for item in results['risk']['cross_dept_risks']:
-                    st.error(f"- {item}")
-            
-            # 推荐下一步动作
-            if results['risk'].get('next_steps'):
-                st.success("✅ 推荐的下一步动作")
-                for item in results['risk']['next_steps']:
-                    st.success(f"- {item}")
+            # 确保risk结果是字典类型
+            if isinstance(results.get('risk'), dict):
+                # 不明确表达
+                if results['risk'].get('unclear_expressions'):
+                    st.error("❌ 表达不够明确的地方")
+                    for item in results['risk']['unclear_expressions']:
+                        st.warning(f"- {item}")
+                
+                # 需要补充的信息
+                if results['risk'].get('needs_supplement'):
+                    st.warning("⚠️ 需要产品经理补充的信息")
+                    for item in results['risk']['needs_supplement']:
+                        st.info(f"- {item}")
+                
+                # 跨部门理解偏差风险
+                if results['risk'].get('cross_dept_risks'):
+                    st.error("🔴 跨部门理解偏差风险")
+                    for item in results['risk']['cross_dept_risks']:
+                        st.error(f"- {item}")
+                
+                # 推荐下一步动作
+                if results['risk'].get('next_steps'):
+                    st.success("✅ 推荐的下一步动作")
+                    for item in results['risk']['next_steps']:
+                        st.success(f"- {item}")
+            else:
+                st.warning("⚠️ 风险分析结果格式异常")
             
             st.download_button(
                 label="📥 下载风险分析报告",
