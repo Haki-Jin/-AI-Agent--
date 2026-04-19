@@ -1,6 +1,27 @@
 import streamlit as st
-from agents import RequirementAnalyzer, EngineeringAgent, DesignAgent, AIAgent, QAAgent, OperationAgent, RiskAnalyzer
-from utils import format_output, create_example_cases
+from agents_fixed import RequirementAnalyzer, EngineeringAgent, DesignAgent, AIAgent, QAAgent, OperationAgent, RiskAnalyzer
+from utils import format_output, create_example_cases, extract_text_from_docx
+
+
+def get_gate_status(analysis_result):
+    """判断总控Agent检查是否通过，仅检查指定通用字段是否齐全"""
+    common_missing = []
+
+    if not analysis_result.get("users"):
+        common_missing.append("目标用户")
+    if not analysis_result.get("core_scenarios"):
+        common_missing.append("核心场景")
+    if not analysis_result.get("core_features"):
+        common_missing.append("核心功能")
+    if not analysis_result.get("success_criteria"):
+        common_missing.append("成功标准")
+    if not analysis_result.get("constraints"):
+        common_missing.append("约束条件")
+    if not analysis_result.get("dependencies"):
+        common_missing.append("依赖条件")
+
+    is_ready = not common_missing
+    return is_ready, common_missing
 
 # 页面配置
 st.set_page_config(
@@ -28,7 +49,7 @@ st.markdown("""
 
 # 侧边栏配置
 with st.sidebar:
-    st.header("⚙️ 配置/")
+    st.header("⚙️ 配置")
     
     # API配置
     api_provider = st.selectbox(
@@ -72,7 +93,12 @@ with st.sidebar:
     st.header("📋 示例案例")
     example_case = st.selectbox(
         "选择示例需求",
-        ["自定义输入", "会议纪要AI功能", "智能客服系统", "个性化推荐引擎"]
+        [
+            "自定义输入",
+            "案例A-信息不足：会议纪要AI想法（会被拦截）",
+            "案例B-信息完整：智能客服系统升级（可进入转译）",
+            "案例C-信息完整：个性化推荐引擎2.0（可进入转译）"
+        ]
     )
     
     if example_case != "自定义输入":
@@ -100,6 +126,37 @@ with col1:
         placeholder="例如：我们希望做一个会议纪要 AI 功能，用户上传录音后，系统可以自动转写、提炼重点、输出待办事项..."
     )
 
+    uploaded_requirement = st.file_uploader(
+        "或上传 Word 需求文档（.docx）",
+        type=["docx"],
+        help="上传后将优先使用 Word 文档内容进行总控检查和需求转译。"
+    )
+
+    uploaded_requirement_text = ""
+    uploaded_requirement_error = ""
+    if uploaded_requirement is not None:
+        try:
+            uploaded_requirement_text = extract_text_from_docx(uploaded_requirement)
+            if uploaded_requirement_text:
+                st.caption(f"已读取 Word 文档：`{uploaded_requirement.name}`。当前将优先使用文档内容。")
+                with st.expander("查看提取后的 Word 文本预览"):
+                    st.text_area(
+                        "Word 文本预览",
+                        value=uploaded_requirement_text,
+                        height=220,
+                        disabled=True
+                    )
+            else:
+                uploaded_requirement_error = "Word 文档中未提取到有效文本，请检查文档内容。"
+        except Exception as exc:
+            uploaded_requirement_error = f"Word 文档解析失败：{exc}"
+
+    if uploaded_requirement_error:
+        st.error(uploaded_requirement_error)
+
+    final_requirement = uploaded_requirement_text if uploaded_requirement_text else raw_requirement
+    input_source = "Word文档" if uploaded_requirement_text else "文本输入"
+
 with col2:
     st.markdown("### 💡 提示")
     st.markdown("""
@@ -107,30 +164,31 @@ with col2:
     - 包含目标用户
     - 说明核心价值
     - 提及关键约束
+    - 支持直接上传 `.docx` 需求文档
     """)
 
 # Step 2: 开始分析按钮
 st.divider()
 if st.button("🚀 开始需求转译", type="primary", use_container_width=True):
-    if not raw_requirement.strip():
-        st.error("请输入原始需求描述！")
+    if uploaded_requirement is not None and uploaded_requirement_error:
+        st.error("请先修复 Word 文档解析错误后再继续。")
+    elif not final_requirement.strip():
+        st.error("请输入原始需求描述，或上传有效的 Word 需求文档！")
     elif not api_key:
         st.error("请在侧边栏输入OpenAI API Key！")
     else:
-        with st.spinner("正在初始化Agent..."):
-            # 初始化所有Agent
+        with st.spinner("正在初始化总控Agent..."):
             analyzer = RequirementAnalyzer(api_key, model_choice, base_url)
-            engineering_agent = EngineeringAgent(api_key, model_choice, base_url)
-            design_agent = DesignAgent(api_key, model_choice, base_url)
-            ai_agent = AIAgent(api_key, model_choice, base_url)
-            qa_agent = QAAgent(api_key, model_choice, base_url)
-            operation_agent = OperationAgent(api_key, model_choice, base_url)
-            risk_analyzer = RiskAnalyzer(api_key, model_choice, base_url)
         
         # Step 2: 总控Agent解析需求
-        st.header("🔍 Step 2: 需求解析结果")
+        st.header("🔍 Step 2: 需求解析与结构化交接")
+        st.caption(f"当前输入来源：{input_source}")
         with st.spinner("总控Agent正在解析需求..."):
-            analysis_result = analyzer.analyze(raw_requirement)
+            analysis_result = analyzer.analyze(final_requirement)
+
+        handoff_packet = analysis_result.get("handoff_packet", {})
+
+        is_ready_for_translation, common_missing = get_gate_status(analysis_result)
         
         # 展示解析结果
         col1, col2, col3 = st.columns(3)
@@ -140,14 +198,52 @@ if st.button("🚀 开始需求转译", type="primary", use_container_width=True
             st.info(f"**目标用户**\n\n{format_output(analysis_result.get('users', 'N/A'))}")
         with col3:
             st.info(f"**核心功能点**\n\n{format_output(analysis_result.get('core_features', 'N/A'))}")
-        
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info(f"**核心场景**\n\n{format_output(analysis_result.get('core_scenarios', []))}")
+        with col2:
+            st.info(f"**成功标准**\n\n{format_output(analysis_result.get('success_criteria', []))}")
+        with col3:
+            st.info(f"**约束条件**\n\n{format_output(analysis_result.get('constraints', []))}")
+
         col1, col2 = st.columns(2)
         with col1:
-            st.warning(f"**不明确点**\n\n{format_output(analysis_result.get('unclear_points', '无明显不明确点'))}")
+            st.warning(f"**不明确点**\n\n{format_output(analysis_result.get('unclear_points', []))}")
         with col2:
-            st.warning(f"**依赖模块**\n\n{format_output(analysis_result.get('dependencies', '无明显依赖'))}")
-        
-        st.success("✅ 需求解析完成！")
+            st.warning(f"**依赖模块**\n\n{format_output(analysis_result.get('dependencies', []))}")
+
+        with st.expander("查看总控 Agent 输出的结构化交接单"):
+            st.json(handoff_packet)
+
+        st.subheader("🧭 通用缺失信息检查")
+        if common_missing:
+            st.warning(format_output(common_missing))
+        else:
+            st.success("通用基础信息检查通过。")
+
+        st.subheader("📝 通用补充建议")
+        supplement_suggestions = analysis_result.get("supplement_suggestions", [])
+        if supplement_suggestions:
+            for suggestion in supplement_suggestions:
+                st.write(f"- {suggestion}")
+        else:
+            st.success("当前输入已覆盖主要通用基础信息。")
+
+        if not is_ready_for_translation:
+            st.error("⛔ 总控Agent检查未通过，当前输入还不足以进入需求转译。")
+            st.info("当前只检查通用缺失信息。请先补齐上方通用基础信息后，再次点击“开始需求转译”。")
+            st.stop()
+
+        st.success("✅ 通用基础信息检查通过，开始基于结构化交接单分发给各部门 Agent。")
+
+        with st.spinner("正在初始化部门Agent..."):
+            engineering_agent = EngineeringAgent(api_key, model_choice, base_url)
+            design_agent = DesignAgent(api_key, model_choice, base_url)
+            ai_agent = AIAgent(api_key, model_choice, base_url)
+            qa_agent = QAAgent(api_key, model_choice, base_url)
+            operation_agent = OperationAgent(api_key, model_choice, base_url)
+            risk_analyzer = RiskAnalyzer(api_key, model_choice, base_url)
         
         # Step 3: 分发给不同角色Agent
         st.divider()
@@ -161,37 +257,37 @@ if st.button("🚀 开始需求转译", type="primary", use_container_width=True
         # 研发版本
         status_text.text("正在生成研发版本...")
         with st.spinner("Engineering Agent 工作中..."):
-            results['engineering'] = engineering_agent.generate(raw_requirement, analysis_result)
+            results['engineering'] = engineering_agent.generate(final_requirement, analysis_result)
         progress_bar.progress(20)
         
         # 设计版本
         status_text.text("正在生成设计版本...")
         with st.spinner("Design Agent 工作中..."):
-            results['design'] = design_agent.generate(raw_requirement, analysis_result)
+            results['design'] = design_agent.generate(final_requirement, analysis_result)
         progress_bar.progress(40)
         
         # 算法/AI版本
         status_text.text("正在生成算法/AI版本...")
         with st.spinner("AI/Algorithm Agent 工作中..."):
-            results['ai'] = ai_agent.generate(raw_requirement, analysis_result)
+            results['ai'] = ai_agent.generate(final_requirement, analysis_result)
         progress_bar.progress(60)
         
         # 测试版本
         status_text.text("正在生成测试版本...")
         with st.spinner("QA Agent 工作中..."):
-            results['qa'] = qa_agent.generate(raw_requirement, analysis_result)
+            results['qa'] = qa_agent.generate(final_requirement, analysis_result)
         progress_bar.progress(80)
         
         # 运营/业务版本
         status_text.text("正在生成运营/业务版本...")
         with st.spinner("Operation Agent 工作中..."):
-            results['operation'] = operation_agent.generate(raw_requirement, analysis_result)
+            results['operation'] = operation_agent.generate(final_requirement, analysis_result)
         progress_bar.progress(90)
         
         # 风险分析
         status_text.text("正在进行风险评估...")
         with st.spinner("Risk Analyzer 工作中..."):
-            results['risk'] = risk_analyzer.analyze(raw_requirement, analysis_result, results)
+            results['risk'] = risk_analyzer.analyze(final_requirement, analysis_result, results)
         progress_bar.progress(100)
         
         status_text.text("✅ 所有Agent工作完成！")
