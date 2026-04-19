@@ -305,7 +305,11 @@ class StructuredHandoffAgent(BaseAgent):
 """.strip()
 
     def generate(self, raw_requirement: str, analysis: Dict[str, Any]) -> str:
-        handoff = analysis.get("handoff_packet") or RequirementAnalyzer.build_handoff_packet(self, raw_requirement, analysis)  # type: ignore[arg-type]
+        handoff = analysis.get("handoff_packet")
+        if not handoff:
+            # 如果交接单不存在，动态生成（兜底方案）
+            analyzer = RequirementAnalyzer(api_key=self.api_key, model=self.model, base_url=self.base_url)
+            handoff = analyzer.build_handoff_packet(raw_requirement, analysis)
         prompt = self.build_handoff_prompt(handoff)
         return self.call_llm(prompt, self.role_system_prompt, temperature=0.3)
 
