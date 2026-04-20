@@ -1,6 +1,9 @@
 #!/bin/bash
 
-# 跨部门协作需求转译AI Agent 启动脚本
+# 跨部门协作需求转译AI Agent 启动脚本cd "/Users/haki/Desktop/需求解析AI-Agent-干净版"
+pkill -f streamlit
+streamlit run app.py
+
 
 echo "======================================"
 echo "  需求转译AI Agent 启动中..."

@@ -8,7 +8,7 @@ from docx import Document
 
 
 def format_output(text) -> str:
-    """格式化输出文本，确俜Markdown格式正确"""
+    """格式化输出文本，确保Markdown格式正确"""
     # 处理None或空值
     if text is None:
         return "暂无内容"
@@ -34,7 +34,7 @@ def format_output(text) -> str:
     if not text:
         return "暂无内容"
     
-    # 确俜是字符串类型
+    # 确保是字符串类型
     if not isinstance(text, str):
         text = str(text)
     

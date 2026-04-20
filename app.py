@@ -1,690 +1,480 @@
+from __future__ import annotations
+
 import re
 from typing import Dict, List
 
+import pandas as pd
 import streamlit as st
 
-from agents import RequirementAnalyzer, EngineeringAgent, DesignAgent, AIAgent, QAAgent, OperationAgent, RiskAnalyzer
-from utils import format_output, create_example_cases, extract_text_from_docx
+from agents import (
+    AIAgent,
+    DesignAgent,
+    EngineeringAgent,
+    OperationAgent,
+    QAAgent,
+    RequirementAnalyzer,
+    RiskAnalyzer,
+)
+from utils import create_example_cases, extract_text_from_docx, format_output
+
+st.set_page_config(page_title="需求协作工作台", page_icon="🧠", layout="wide")
 
 
-st.set_page_config(
-    page_title="需求转译 AI Workspace",
-    page_icon="✨",
-    layout="wide",
-    initial_sidebar_state="expanded",
+st.markdown(
+    """
+    <style>
+    .stApp { background: #f7f8fb; }
+    .block-container { max-width: 1380px; padding-top: 1.2rem; padding-bottom: 2rem; }
+    .small-muted { color: #6b7280; font-size: 0.92rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-
-def inject_css():
-    st.markdown(
-        """
-        <style>
-        :root {
-            --bg: #f7f8fc;
-            --card: rgba(255,255,255,0.88);
-            --line: rgba(15, 23, 42, 0.08);
-            --text: #111827;
-            --muted: #6b7280;
-            --accent: #5b55eb;
-            --accent-soft: rgba(91,85,235,0.08);
-            --ok: #16a34a;
-            --warn: #d97706;
-        }
-        .stApp {
-            background:
-                radial-gradient(circle at top left, rgba(99,102,241,0.10), transparent 26%),
-                linear-gradient(180deg, #fafbff 0%, #f5f7fb 100%);
-        }
-        .block-container {
-            max-width: 1280px;
-            padding-top: 1.1rem;
-            padding-bottom: 2rem;
-        }
-        .hero {
-            background: rgba(255,255,255,0.72);
-            border: 1px solid rgba(255,255,255,0.65);
-            backdrop-filter: blur(8px);
-            border-radius: 24px;
-            padding: 1.2rem 1.35rem;
-            box-shadow: 0 18px 48px rgba(15,23,42,0.06);
-            margin-bottom: 1rem;
-        }
-        .hero h1 {
-            margin: 0;
-            font-size: 1.72rem;
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            color: var(--text);
-        }
-        .hero p {
-            margin: 0.45rem 0 0 0;
-            color: var(--muted);
-            font-size: 0.96rem;
-        }
-        .stage-pill {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.34rem 0.7rem;
-            border-radius: 999px;
-            background: var(--accent-soft);
-            color: #4338ca;
-            font-size: 0.8rem;
-            font-weight: 700;
-            margin-bottom: 0.8rem;
-        }
-        .card {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 24px;
-            padding: 1.05rem 1.1rem;
-            box-shadow: 0 12px 30px rgba(15,23,42,0.05);
-            margin-bottom: 1rem;
-        }
-        .card h3 {
-            margin: 0 0 0.3rem 0;
-            color: var(--text);
-            font-size: 1.04rem;
-        }
-        .card p {
-            margin: 0;
-            color: var(--muted);
-            font-size: 0.92rem;
-        }
-        .assistant {
-            background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.95));
-            border: 1px solid var(--line);
-            border-radius: 22px;
-            padding: 1rem;
-            box-shadow: 0 10px 24px rgba(15,23,42,0.05);
-        }
-        .assistant-tag {
-            display: inline-block;
-            padding: 0.18rem 0.58rem;
-            border-radius: 999px;
-            background: var(--accent-soft);
-            color: #4338ca;
-            font-size: 0.75rem;
-            font-weight: 700;
-            margin-bottom: 0.55rem;
-        }
-        .assistant h4 {
-            margin: 0 0 0.4rem 0;
-            color: var(--text);
-            font-size: 1rem;
-        }
-        .assistant-body {
-            color: #475467;
-            font-size: 0.93rem;
-            line-height: 1.6;
-            white-space: pre-wrap;
-        }
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 0.7rem;
-            margin-top: 0.9rem;
-        }
-        .kv {
-            background: rgba(248,250,252,0.92);
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 0.8rem 0.9rem;
-        }
-        .kv .label {
-            font-size: 0.8rem;
-            color: var(--muted);
-            margin-bottom: 0.28rem;
-        }
-        .kv .value {
-            font-size: 0.92rem;
-            color: var(--text);
-            font-weight: 600;
-            line-height: 1.55;
-            white-space: pre-wrap;
-        }
-        .soft-note {
-            color: var(--muted);
-            font-size: 0.86rem;
-            margin-top: 0.45rem;
-        }
-        .result-shell {
-            background: rgba(255,255,255,0.88);
-            border: 1px solid var(--line);
-            border-radius: 24px;
-            padding: 0.35rem 0.5rem 0.8rem 0.5rem;
-            box-shadow: 0 12px 30px rgba(15,23,42,0.05);
-            margin-top: 0.8rem;
-        }
-        div[data-testid="stTextArea"] textarea,
-        div[data-testid="stTextInput"] input {
-            border-radius: 16px !important;
-            border: 1px solid rgba(15,23,42,0.10) !important;
-            background: rgba(255,255,255,0.98) !important;
-        }
-        .stButton > button {
-            border-radius: 14px !important;
-            font-weight: 700 !important;
-            box-shadow: 0 8px 20px rgba(15,23,42,0.05);
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+ROLE_LABELS = {
+    "engineering": "研发",
+    "design": "设计",
+    "ai": "算法",
+    "qa": "测试",
+    "operation": "运营",
+}
+FIELD_MAP = [
+    ("需求目标", "goal", False),
+    ("目标用户", "users", True),
+    ("核心场景", "core_scenarios", True),
+    ("核心功能", "core_features", True),
+    ("成功标准", "success_criteria", True),
+    ("约束条件", "constraints", True),
+    ("依赖条件", "dependencies", True),
+    ("非目标/本期不做", "non_goals", True),
+    ("MVP范围", "mvp_scope", True),
+    ("风险与合规点", "risks_and_compliance", True),
+    ("待确认问题", "unclear_points", True),
+]
 
 
-def render_hero():
-    st.markdown(
-        """
-        <div class="hero">
-            <div class="stage-pill">需求转译工作台</div>
-            <h1>先让 AI 帮你补全，再确认分发</h1>
-            <p>不平铺所有信息。先输入需求，AI 生成一份建议交接单；你确认无误后，再生成研发、设计、算法、测试、运营文档。</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def ensure_state():
+# ---------- state ----------
+def init_state() -> None:
     defaults = {
-        "raw_requirement": "",
-        "uploaded_name": "",
-        "final_requirement": "",
-        "analysis_result": None,
-        "results": None,
-        "analysis_done": False,
-        "generation_done": False,
-        "handoff_confirmed": False,
-        "recommended_handoff_text": "",
         "api_key": "",
         "base_url": "https://api.deepseek.com/v1",
         "model_choice": "deepseek-chat",
+        "provider": "DeepSeek",
+        "raw_requirement": "",
+        "source_requirement": "",
+        "analysis": None,
+        "recommended_handoff_text": "",
+        "handoff_confirmed": False,
+        "docs_generated": False,
+        "docs": {},
+        "risk": {},
+        "feedback_history": {r: [] for r in ROLE_LABELS},
+        "task_table": pd.DataFrame([
+            {"任务": "补全交接单", "负责人": "产品", "开始": "", "截止": "", "状态": "待开始", "备注": ""},
+            {"任务": "需求评审", "负责人": "产品/研发/设计", "开始": "", "截止": "", "状态": "待开始", "备注": ""},
+            {"任务": "开发与联调", "负责人": "研发", "开始": "", "截止": "", "状态": "待开始", "备注": ""},
+            {"任务": "测试准备", "负责人": "测试", "开始": "", "截止": "", "状态": "待开始", "备注": ""},
+            {"任务": "上线准备", "负责人": "运营", "开始": "", "截止": "", "状态": "待开始", "备注": ""},
+        ]),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
 
-ensure_state()
-inject_css()
-render_hero()
-
+init_state()
 examples = create_example_cases()
 
 
-# ---------- helper functions ----------
-def prepare_requirement_text(uploaded_requirement, text_requirement: str) -> tuple[str, str, str]:
-    uploaded_requirement_text = ""
-    uploaded_requirement_error = ""
-    uploaded_name = ""
-    if uploaded_requirement is not None:
-        uploaded_name = uploaded_requirement.name
+# ---------- helpers ----------
+def reset_generated_content() -> None:
+    st.session_state.docs_generated = False
+    st.session_state.docs = {}
+    st.session_state.risk = {}
+    st.session_state.feedback_history = {r: [] for r in ROLE_LABELS}
+
+
+def build_agent(role: str):
+    kwargs = dict(
+        api_key=st.session_state.api_key,
+        model=st.session_state.model_choice,
+        base_url=st.session_state.base_url,
+    )
+    mapping = {
+        "engineering": EngineeringAgent,
+        "design": DesignAgent,
+        "ai": AIAgent,
+        "qa": QAAgent,
+        "operation": OperationAgent,
+    }
+    return mapping[role](**kwargs)
+
+
+def get_analyzer() -> RequirementAnalyzer:
+    return RequirementAnalyzer(
+        st.session_state.api_key,
+        st.session_state.model_choice,
+        st.session_state.base_url,
+    )
+
+
+def prepare_requirement(uploaded_file, raw_text: str):
+    extracted = ""
+    error = ""
+    if uploaded_file is not None:
         try:
-            uploaded_requirement_text = extract_text_from_docx(uploaded_requirement)
-            if not uploaded_requirement_text:
-                uploaded_requirement_error = "Word 文档中未提取到有效文本，请检查文档内容。"
+            extracted = extract_text_from_docx(uploaded_file)
+            if not extracted:
+                error = "Word 文档中没有提取到有效文本。"
         except Exception as exc:
-            uploaded_requirement_error = f"Word 文档解析失败：{exc}"
-    final_requirement = uploaded_requirement_text if uploaded_requirement_text else text_requirement
-    return final_requirement, uploaded_requirement_error, uploaded_name
+            error = f"Word 文档解析失败：{exc}"
+    return (extracted if extracted else raw_text).strip(), error
 
 
-def normalize_list(value) -> List[str]:
-    if isinstance(value, list):
-        return [str(x).strip() for x in value if str(x).strip()]
-    if isinstance(value, str) and value.strip():
-        return [value.strip()]
-    return []
+def build_handoff_markdown_from_analysis(analysis: Dict) -> str:
+    analyzer = get_analyzer()
+    return analyzer.to_markdown(analysis)
 
 
-def get_gate_status(analysis_result: Dict) -> tuple[bool, List[str]]:
-    common_missing = []
-    if not analysis_result.get("users"):
-        common_missing.append("目标用户")
-    if not analysis_result.get("core_scenarios"):
-        common_missing.append("核心场景")
-    if not analysis_result.get("core_features"):
-        common_missing.append("核心功能")
-    if not analysis_result.get("success_criteria"):
-        common_missing.append("成功标准")
-    if not analysis_result.get("constraints"):
-        common_missing.append("约束条件")
-    if not analysis_result.get("dependencies"):
-        common_missing.append("依赖条件")
-    return (len(common_missing) == 0), common_missing
+def _clean_line_value(value: str) -> str:
+    return value.strip().strip("：:").strip()
 
 
-def generate_recommended_handoff_text(analysis: Dict) -> str:
-    ready, missing = get_gate_status(analysis)
-
-    def fmt_lines(items, missing_name=None):
-        items = normalize_list(items)
-        if items:
-            return "\n".join([f"- {item}" for item in items])
-        if missing_name:
-            return f"【请补充：{missing_name}】"
-        return "【无】"
-
-    goal = analysis.get("goal", "未明确") or "未明确"
-    unclear = normalize_list(analysis.get("unclear_points", []))
-    unclear_text = "\n".join([f"- {item}" for item in unclear]) if unclear else "【无】"
-
-    draft = f"""需求目标：
-{goal}
-
-目标用户：
-{fmt_lines(analysis.get('users', []), '目标用户')}
-
-核心场景：
-{fmt_lines(analysis.get('core_scenarios', []), '核心场景')}
-
-核心功能：
-{fmt_lines(analysis.get('core_features', []), '核心功能')}
-
-成功标准：
-{fmt_lines(analysis.get('success_criteria', []), '成功标准')}
-
-约束条件：
-{fmt_lines(analysis.get('constraints', []), '约束条件')}
-
-依赖条件：
-{fmt_lines(analysis.get('dependencies', []), '依赖条件')}
-
-不明确点：
-{unclear_text}
-"""
-    if not ready and missing:
-        draft += "\nAI 提示：\n" + "\n".join([f"- 还缺：{item}" for item in missing])
-    return draft.strip()
-
-
-SECTION_MAP = {
-    "需求目标": "goal",
-    "目标用户": "users",
-    "核心场景": "core_scenarios",
-    "核心功能": "core_features",
-    "成功标准": "success_criteria",
-    "约束条件": "constraints",
-    "依赖条件": "dependencies",
-    "不明确点": "unclear_points",
-}
-
-
-def parse_recommended_handoff_text(text: str, raw_requirement: str) -> Dict:
-    pattern = r"(?ms)^(需求目标|目标用户|核心场景|核心功能|成功标准|约束条件|依赖条件|不明确点|AI 提示)：\s*\n(.*?)(?=^(?:需求目标|目标用户|核心场景|核心功能|成功标准|约束条件|依赖条件|不明确点|AI 提示)：|\Z)"
-    matches = re.findall(pattern, text.strip())
-    parsed = {
-        "goal": raw_requirement[:100] if raw_requirement else "未明确",
+def parse_handoff_text(text: str, raw_requirement: str) -> Dict:
+    buckets = {
+        "goal": "",
         "users": [],
         "core_scenarios": [],
         "core_features": [],
         "success_criteria": [],
         "constraints": [],
         "dependencies": [],
+        "non_goals": [],
+        "mvp_scope": [],
+        "risks_and_compliance": [],
         "unclear_points": [],
     }
+    title_map = {title: key for title, key, _ in FIELD_MAP}
+    current = None
 
-    for section, content in matches:
-        content = content.strip()
-        if section == "AI 提示":
-            continue
-        field = SECTION_MAP[section]
-        if field == "goal":
-            cleaned = " ".join([line.strip("- ").strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("【请补充")])
-            parsed[field] = cleaned or "未明确"
+    def append_value(key: str, val: str):
+        val = val.strip()
+        if not val or val in {"【待补充】", "待补充"}:
+            return
+        if key == "goal":
+            buckets[key] = val
         else:
-            lines = []
-            for line in content.splitlines():
-                cleaned = line.strip().strip("- ").strip()
-                if not cleaned:
-                    continue
-                if cleaned.startswith("【请补充") or cleaned == "【无】":
-                    continue
-                lines.append(cleaned)
-            parsed[field] = lines
+            buckets[key].append(val)
 
-    ready, missing = get_gate_status(parsed)
-    parsed["missing_common_info"] = missing
-    suggestion_map = {
-        "目标用户": "请补充这项需求的目标用户是谁。",
-        "核心场景": "请补充这项需求的核心使用场景。",
-        "核心功能": "请补充这项需求的核心功能内容。",
-        "成功标准": "请补充这项需求的成功标准或验收口径。",
-        "约束条件": "请补充这项需求的约束条件，例如时间、资源、合规或平台限制。",
-        "依赖条件": "请补充这项需求的依赖条件，例如系统、数据或第三方服务依赖。",
-    }
-    parsed["supplement_suggestions"] = [suggestion_map[item] for item in missing if item in suggestion_map]
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^#+\s*", "", line)
+        line = line.replace("**", "")
 
-    analyzer = RequirementAnalyzer(api_key=st.session_state.api_key, model=st.session_state.model_choice, base_url=st.session_state.base_url)
-    parsed["handoff_packet"] = analyzer.build_handoff_packet(raw_requirement, parsed)
-    parsed["handoff_packet"]["ready_for_handoff"] = ready
-    return parsed
+        matched_title = None
+        for title in title_map:
+            if line == title or line.startswith(f"{title}:") or line.startswith(f"{title}："):
+                matched_title = title
+                break
 
+        if matched_title:
+            current = title_map[matched_title]
+            if "：" in line or ":" in line:
+                _, rest = re.split(r"[:：]", line, maxsplit=1)
+                append_value(current, _clean_line_value(rest))
+            continue
 
-def run_analysis(final_requirement: str):
-    analyzer = RequirementAnalyzer(
-        api_key=st.session_state.api_key,
-        model=st.session_state.model_choice,
-        base_url=st.session_state.base_url,
-    )
-    analysis_result = analyzer.analyze(final_requirement)
-    st.session_state.analysis_result = analysis_result
-    st.session_state.recommended_handoff_text = generate_recommended_handoff_text(analysis_result)
-    st.session_state.analysis_done = True
-    st.session_state.handoff_confirmed = False
-    st.session_state.generation_done = False
-    st.session_state.results = None
+        value = line.lstrip("-• ").strip()
+        if current:
+            append_value(current, value)
+
+    analyzer = get_analyzer()
+    analysis = {**buckets}
+    analysis["missing_common_info"] = analyzer._build_missing_info(analysis)
+    analysis["supplement_suggestions"] = analyzer._build_supplement_suggestions(analysis["missing_common_info"])
+    analysis["recommended_handoff_markdown"] = analyzer.to_markdown(analysis)
+    analysis["handoff_packet"] = analyzer.build_handoff_packet(raw_requirement, analysis)
+    return analysis
 
 
+def render_analysis_summary(analysis: Dict) -> None:
+    col1, col2 = st.columns(2)
+    rows = [
+        ("需求目标", analysis.get("goal", "未明确")),
+        ("目标用户", format_output(analysis.get("users", []))),
+        ("核心场景", format_output(analysis.get("core_scenarios", []))),
+        ("核心功能", format_output(analysis.get("core_features", []))),
+        ("成功标准", format_output(analysis.get("success_criteria", []))),
+        ("约束条件", format_output(analysis.get("constraints", []))),
+        ("依赖条件", format_output(analysis.get("dependencies", []))),
+        ("非目标/本期不做", format_output(analysis.get("non_goals", []))),
+        ("MVP范围", format_output(analysis.get("mvp_scope", []))),
+        ("风险与合规点", format_output(analysis.get("risks_and_compliance", []))),
+        ("待确认问题", format_output(analysis.get("unclear_points", []))),
+    ]
+    for i, (label, value) in enumerate(rows):
+        container = col1 if i % 2 == 0 else col2
+        with container:
+            st.markdown(f"**{label}**")
+            st.info(value if value and value != "暂无内容" else "暂无内容")
 
-def run_generation(final_requirement: str, analysis_result: Dict):
-    results = {}
-    engineering_agent = EngineeringAgent(st.session_state.api_key, st.session_state.model_choice, st.session_state.base_url)
-    design_agent = DesignAgent(st.session_state.api_key, st.session_state.model_choice, st.session_state.base_url)
-    ai_agent = AIAgent(st.session_state.api_key, st.session_state.model_choice, st.session_state.base_url)
-    qa_agent = QAAgent(st.session_state.api_key, st.session_state.model_choice, st.session_state.base_url)
-    operation_agent = OperationAgent(st.session_state.api_key, st.session_state.model_choice, st.session_state.base_url)
-    risk_analyzer = RiskAnalyzer(st.session_state.api_key, st.session_state.model_choice, st.session_state.base_url)
 
+def generate_all_docs() -> None:
+    analysis = st.session_state.analysis
+    roles = ["engineering", "design", "ai", "qa", "operation"]
+    docs = {}
     progress = st.progress(0)
     status = st.empty()
-
-    status.info("正在生成研发版本…")
-    results["engineering"] = engineering_agent.generate(final_requirement, analysis_result)
-    progress.progress(16)
-
-    status.info("正在生成设计版本…")
-    results["design"] = design_agent.generate(final_requirement, analysis_result)
-    progress.progress(32)
-
-    status.info("正在生成算法版本…")
-    results["ai"] = ai_agent.generate(final_requirement, analysis_result)
-    progress.progress(48)
-
-    status.info("正在生成测试版本…")
-    results["qa"] = qa_agent.generate(final_requirement, analysis_result)
-    progress.progress(64)
-
-    status.info("正在生成运营版本…")
-    results["operation"] = operation_agent.generate(final_requirement, analysis_result)
-    progress.progress(80)
-
-    status.info("正在生成风险分析…")
-    results["risk"] = risk_analyzer.analyze(final_requirement, analysis_result, results)
-    progress.progress(100)
-    status.success("全部角色版本已生成。")
-
-    st.session_state.results = results
-    st.session_state.generation_done = True
+    for idx, role in enumerate(roles, start=1):
+        status.write(f"正在生成{ROLE_LABELS[role]}文档...")
+        docs[role] = build_agent(role).generate(analysis)
+        progress.progress(int(idx / len(roles) * 100))
+    status.write("正在生成风险提醒...")
+    risk_agent = RiskAnalyzer(st.session_state.api_key, st.session_state.model_choice, st.session_state.base_url)
+    risk = risk_agent.analyze(analysis, docs)
+    st.session_state.docs = docs
+    st.session_state.risk = risk
+    st.session_state.docs_generated = True
+    status.empty()
 
 
-# ---------- sidebar ----------
+# ---------- UI ----------
+st.title("需求协作工作台")
+st.caption("AI 先自动拆解推荐交接单，你确认后再生成研发、设计、算法、测试、运营文档，并支持继续批注迭代。")
+
 with st.sidebar:
-    st.markdown("### 控制台")
-    api_provider = st.selectbox(
+    st.subheader("配置")
+    provider = st.selectbox(
         "模型提供商",
         ["DeepSeek", "豆包(Doubao)", "通义千问(Qwen)", "自定义 OpenAI 兼容 API"],
-        index=0,
+        key="provider",
     )
+    st.text_input("API Key", type="password", key="api_key")
 
-    st.session_state.api_key = st.text_input("API Key", type="password", value=st.session_state.api_key)
-
-    if api_provider == "DeepSeek":
-        st.session_state.base_url = st.text_input("Base URL", value=st.session_state.base_url or "https://api.deepseek.com/v1")
-        st.session_state.model_choice = st.selectbox("模型", ["deepseek-chat", "deepseek-reasoner"], index=0)
-    elif api_provider == "豆包(Doubao)":
-        st.session_state.base_url = st.text_input("Base URL", value="https://ark.cn-beijing.volces.com/api/v3")
-        st.session_state.model_choice = st.selectbox("模型", ["doubao-pro-32k", "doubao-lite-32k", "doubao-pro-128k"], index=0)
-    elif api_provider == "通义千问(Qwen)":
-        st.session_state.base_url = st.text_input("Base URL", value="https://dashscope.aliyuncs.com/compatible-mode/v1")
-        st.session_state.model_choice = st.selectbox("模型", ["qwen-plus", "qwen-turbo", "qwen-max"], index=0)
+    if provider == "DeepSeek":
+        st.text_input("Base URL", value="https://api.deepseek.com/v1", key="base_url")
+        st.selectbox("模型", ["deepseek-chat", "deepseek-reasoner"], index=0, key="model_choice")
+    elif provider == "豆包(Doubao)":
+        st.text_input("Base URL", value="https://ark.cn-beijing.volces.com/api/v3", key="base_url")
+        st.selectbox("模型", ["doubao-pro-32k", "doubao-lite-32k", "doubao-pro-128k"], index=0, key="model_choice")
+    elif provider == "通义千问(Qwen)":
+        st.text_input("Base URL", value="https://dashscope.aliyuncs.com/compatible-mode/v1", key="base_url")
+        st.selectbox("模型", ["qwen-plus", "qwen-turbo", "qwen-max"], index=0, key="model_choice")
     else:
-        st.session_state.base_url = st.text_input("Base URL", value="https://api.openai.com/v1")
-        st.session_state.model_choice = st.text_input("模型", value="gpt-4o-mini")
+        st.text_input("Base URL", key="base_url")
+        st.text_input("模型", key="model_choice")
 
     st.divider()
-    selected_example = st.selectbox("示例需求", ["自定义输入"] + list(examples.keys()), index=0)
+    example_choice = st.selectbox("示例需求", ["自定义输入"] + list(examples.keys()))
     if st.button("载入示例", use_container_width=True):
-        st.session_state.raw_requirement = "" if selected_example == "自定义输入" else examples[selected_example]
-        st.session_state.analysis_result = None
+        st.session_state.raw_requirement = "" if example_choice == "自定义输入" else examples[example_choice]
+        st.session_state.source_requirement = st.session_state.raw_requirement
+        st.session_state.analysis = None
         st.session_state.recommended_handoff_text = ""
-        st.session_state.results = None
-        st.session_state.analysis_done = False
-        st.session_state.generation_done = False
         st.session_state.handoff_confirmed = False
+        reset_generated_content()
         st.rerun()
 
-    if st.button("清空", use_container_width=True):
-        for key in [
-            "raw_requirement", "uploaded_name", "final_requirement", "analysis_result", "results",
-            "analysis_done", "generation_done", "handoff_confirmed", "recommended_handoff_text"
-        ]:
-            st.session_state[key] = "" if isinstance(st.session_state.get(key), str) else False if isinstance(st.session_state.get(key), bool) else None
-        st.session_state.raw_requirement = ""
-        st.session_state.analysis_done = False
-        st.session_state.generation_done = False
+    if st.button("清空当前状态", use_container_width=True):
+        for key in ["raw_requirement", "source_requirement", "analysis", "recommended_handoff_text"]:
+            st.session_state[key] = "" if key != "analysis" else None
         st.session_state.handoff_confirmed = False
+        reset_generated_content()
         st.rerun()
 
+left, right = st.columns([1.05, 1], gap="large")
 
-# ---------- stage 1 ----------
-if not st.session_state.analysis_done:
-    left, right = st.columns([1.15, 0.85], gap="large")
+with left:
+    st.subheader("输入需求")
+    st.caption("支持直接粘贴需求，也支持上传 Word 文档。")
+    st.text_area(
+        "产品原始需求",
+        key="raw_requirement",
+        height=260,
+        label_visibility="collapsed",
+        placeholder="例如：我想做一个情感陪伴 app，和用户交互生成镜像虚拟形象，陪伴用户做正念、冥想、CBT 等认知干预……",
+    )
+    uploaded = st.file_uploader("上传 .docx", type=["docx"])
 
-    with left:
-        st.markdown('<div class="card"><h3>输入原始需求</h3><p>支持粘贴想法，或上传 Word 文档。</p></div>', unsafe_allow_html=True)
-        raw_requirement = st.text_area(
-            "产品经理原始需求",
-            value=st.session_state.raw_requirement,
-            height=300,
-            placeholder="例如：我们希望做一个会议纪要 AI 功能，用户上传录音后，系统可以自动转写、提炼重点、输出待办事项……",
-        )
-        st.session_state.raw_requirement = raw_requirement
-
-        uploaded_requirement = st.file_uploader("上传 Word 需求文档（.docx）", type=["docx"])
-        final_requirement, uploaded_requirement_error, uploaded_name = prepare_requirement_text(uploaded_requirement, raw_requirement)
-        st.session_state.final_requirement = final_requirement
-        st.session_state.uploaded_name = uploaded_name
-
-        if uploaded_requirement_error:
-            st.error(uploaded_requirement_error)
-        elif uploaded_name:
-            st.success(f"已读取文档：{uploaded_name}")
-
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("开始解析", type="primary", use_container_width=True):
-                if not st.session_state.api_key:
-                    st.error("请先在左侧填写 API Key。")
-                elif not final_requirement.strip():
-                    st.error("请输入需求内容或上传有效文档。")
-                elif uploaded_requirement_error:
-                    st.error("请先修复文档解析问题。")
-                else:
-                    with st.spinner("AI 正在整理需求…"):
-                        run_analysis(final_requirement)
-                    st.rerun()
-        with c2:
-            st.button("等待 AI 建议", use_container_width=True, disabled=True)
-
-    with right:
-        st.markdown(
-            '''
-            <div class="assistant">
-                <div class="assistant-tag">AI 助理</div>
-                <h4>我会先帮你生成一份建议交接单</h4>
-                <div class="assistant-body">解析后，我不会把所有信息都摊开。
-我会先给你一份可编辑的 AI 推荐文本，你只需要确认、微调、点击采用，然后再生成各部门需求文档。</div>
-            </div>
-            ''',
-            unsafe_allow_html=True,
-        )
-        st.markdown('<div class="soft-note">这一步只有输入，不会直接进入复杂结果页。</div>', unsafe_allow_html=True)
-
-
-# ---------- stage 2 ----------
-elif st.session_state.analysis_done and not st.session_state.handoff_confirmed:
-    analysis = st.session_state.analysis_result
-    ready, missing = get_gate_status(analysis)
-
-    left, right = st.columns([0.86, 1.14], gap="large")
-
-    with left:
-        st.markdown('<div class="card"><h3>当前解析摘要</h3><p>这里只展示最关键的信息，避免页面过重。</p></div>', unsafe_allow_html=True)
-        def kv(label, value):
-            return f'<div class="kv"><div class="label">{label}</div><div class="value">{value}</div></div>'
-
-        goal_text = format_output(analysis.get("goal", "未明确"))
-        users_text = format_output(analysis.get("users", []))
-        scene_text = format_output(analysis.get("core_scenarios", []))
-        feature_text = format_output(analysis.get("core_features", []))
-        st.markdown(
-            f'<div class="summary-grid">{kv("需求目标", goal_text)}{kv("目标用户", users_text)}{kv("核心场景", scene_text)}{kv("核心功能", feature_text)}</div>',
-            unsafe_allow_html=True,
-        )
-
-        if missing:
-            st.warning("还缺这些通用信息：" + "、".join(missing))
+    if st.button("开始解析", use_container_width=True, type="primary"):
+        if not st.session_state.api_key:
+            st.error("请先在左侧输入 API Key。")
         else:
-            st.success("基础信息已齐全。你可以直接确认这份交接单。")
+            final_requirement, error = prepare_requirement(uploaded, st.session_state.raw_requirement)
+            if error:
+                st.error(error)
+            elif not final_requirement:
+                st.error("请先输入需求或上传 Word 文档。")
+            else:
+                st.session_state.source_requirement = final_requirement
+                analyzer = get_analyzer()
+                with st.spinner("AI 正在自动拆解需求并生成推荐交接单..."):
+                    analysis = analyzer.analyze(final_requirement)
+                st.session_state.analysis = analysis
+                st.session_state.recommended_handoff_text = analysis.get("recommended_handoff_markdown", "")
+                st.session_state.handoff_confirmed = False
+                reset_generated_content()
+                st.rerun()
 
-        if st.button("返回重新输入", use_container_width=True):
-            st.session_state.analysis_done = False
-            st.session_state.handoff_confirmed = False
-            st.session_state.results = None
-            st.session_state.generation_done = False
+with right:
+    st.subheader("AI 推荐交接单")
+    if st.session_state.analysis is None:
+        st.info("点击左侧“开始解析”后，我会自动拆解需求目标、目标用户、核心场景、核心功能、成功标准、约束条件、依赖条件、MVP 范围、非目标与待确认问题。")
+    else:
+        analysis = st.session_state.analysis
+        st.caption("你可以直接编辑下面的交接单文本。确认后，后续所有部门文档都会以这份内容为准。")
+
+        missing = analysis.get("missing_common_info", [])
+        if missing:
+            st.warning("当前仍缺少这些共用信息：" + "、".join(missing))
+        else:
+            st.success("通用信息已较完整，可以直接进入部门文档生成。")
+
+        if analysis.get("supplement_suggestions"):
+            with st.expander("查看 AI 补充建议", expanded=False):
+                for s in analysis["supplement_suggestions"]:
+                    st.write(f"- {s}")
+
+        # 使用不同的变量名来存储推荐的交接单文本
+        if "recommended_handoff_value" not in st.session_state:
+            st.session_state.recommended_handoff_value = st.session_state.recommended_handoff_text
+        
+        edited_handoff = st.text_area(
+            "推荐交接单（可直接编辑）",
+            value=st.session_state.recommended_handoff_value,
+            key="recommended_handoff_editor",
+            height=460,
+            label_visibility="collapsed",
+        )
+        # 同步用户编辑的内容到 session_state
+        st.session_state.recommended_handoff_text = edited_handoff
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("确认采用交接单", use_container_width=True, type="primary"):
+                updated_analysis = parse_handoff_text(st.session_state.recommended_handoff_text, st.session_state.source_requirement or st.session_state.raw_requirement)
+                st.session_state.analysis = updated_analysis
+                # 更新推荐的交接单内容
+                st.session_state.recommended_handoff_value = updated_analysis.get("recommended_handoff_markdown", st.session_state.recommended_handoff_text)
+                st.session_state.recommended_handoff_text = st.session_state.recommended_handoff_value
+                st.session_state.handoff_confirmed = True
+                reset_generated_content()
+                st.success("已更新并确认交接单。")
+                st.rerun()
+        with c2:
+            if st.button("重新生成推荐交接单", use_container_width=True):
+                if not st.session_state.api_key:
+                    st.error("请先输入 API Key。")
+                else:
+                    analyzer = get_analyzer()
+                    source = st.session_state.source_requirement or st.session_state.raw_requirement
+                    with st.spinner("正在重新生成推荐交接单..."):
+                        analysis = analyzer.analyze(source)
+                    st.session_state.analysis = analysis
+                    # 更新推荐的交接单内容
+                    st.session_state.recommended_handoff_value = analysis.get("recommended_handoff_markdown", "")
+                    st.session_state.recommended_handoff_text = st.session_state.recommended_handoff_value
+                    st.session_state.handoff_confirmed = False
+                    reset_generated_content()
+                    st.rerun()
+
+if st.session_state.handoff_confirmed and st.session_state.analysis:
+    st.divider()
+    st.subheader("确认后的交接单摘要")
+    render_analysis_summary(st.session_state.analysis)
+    st.markdown("")
+    if st.button("生成各部门需求文档", use_container_width=False, type="primary"):
+        if not st.session_state.api_key:
+            st.error("请先输入 API Key。")
+        else:
+            with st.spinner("正在生成部门文档..."):
+                generate_all_docs()
             st.rerun()
 
-    with right:
-        ai_msg = "我已经根据你的原始需求整理出一份建议交接单。你可以直接在下面修改文本，再点击确认采用。"
-        if missing:
-            ai_msg += "\n\n我已经把缺失项用【请补充】标出来了。"
-        st.markdown(
-            f'''
-            <div class="assistant">
-                <div class="assistant-tag">AI 助理</div>
-                <h4>请确认这份 AI 推荐内容</h4>
-                <div class="assistant-body">{ai_msg}</div>
-            </div>
-            ''',
-            unsafe_allow_html=True,
-        )
+if st.session_state.docs_generated:
+    st.divider()
+    tab1, tab2, tab3 = st.tabs(["部门文档", "批注与 AI 协作", "排期与任务"])
 
-        recommended_text = st.text_area(
-            "AI 推荐交接单",
-            value=st.session_state.recommended_handoff_text,
-            height=420,
-            key="recommended_handoff_area",
-            help="你可以直接修改这段文本。确认后，系统会把它作为五个角色的统一输入依据。",
-        )
+    with tab1:
+        doc_tabs = st.tabs([f"{ROLE_LABELS[r]}文档" for r in ROLE_LABELS] + ["风险提醒"])
+        for idx, role in enumerate(ROLE_LABELS):
+            with doc_tabs[idx]:
+                doc_text = st.session_state.docs.get(role, "")
+                st.markdown(doc_text or "暂无内容")
+                st.download_button(
+                    f"下载{ROLE_LABELS[role]}文档",
+                    data=doc_text,
+                    file_name=f"{role}_requirement.md",
+                    mime="text/markdown",
+                    key=f"download_{role}",
+                )
+        with doc_tabs[-1]:
+            risk = st.session_state.risk
+            for title, key in [
+                ("表达不明确", "unclear_expressions"),
+                ("需补充信息", "needs_supplement"),
+                ("跨部门偏差风险", "cross_dept_risks"),
+                ("隐性依赖", "hidden_dependencies"),
+                ("可行性风险", "feasibility_risks"),
+                ("下一步建议", "next_steps"),
+            ]:
+                st.markdown(f"**{title}**")
+                items = risk.get(key, [])
+                if items:
+                    for item in items:
+                        st.write(f"- {item}")
+                else:
+                    st.write("- 暂无")
 
-        c1, c2 = st.columns([1, 1])
+    with tab2:
+        role = st.selectbox("选择要协作修改的角色文档", list(ROLE_LABELS.keys()), format_func=lambda x: ROLE_LABELS[x])
+        current_doc = st.session_state.docs.get(role, "")
+        st.text_area("当前文档", value=current_doc, height=320, key=f"current_doc_view_{role}")
+        feedback = st.text_area(
+            "你的批注 / 修改要求",
+            height=140,
+            key=f"feedback_{role}",
+            placeholder="例如：研发文档里的输入定义太空了，请补充请求参数；成功标准写得太泛了，请收紧到可验收口径。",
+        )
+        c1, c2 = st.columns(2)
         with c1:
-            if st.button("确认采用这份交接单", type="primary", use_container_width=True):
-                parsed = parse_recommended_handoff_text(recommended_text, st.session_state.final_requirement)
-                st.session_state.analysis_result = parsed
-                st.session_state.recommended_handoff_text = recommended_text
-                st.session_state.handoff_confirmed = True
-                st.session_state.generation_done = False
-                st.session_state.results = None
+            if st.button("让 AI 先给修改建议", use_container_width=True, key=f"suggest_{role}"):
+                with st.spinner("AI 正在生成修改建议..."):
+                    result = build_agent(role).suggest_revision(st.session_state.analysis, current_doc, feedback)
+                st.session_state.feedback_history[role].append({"type": "suggestion", "content": result})
                 st.rerun()
         with c2:
-            if st.button("重新生成 AI 建议", use_container_width=True):
-                st.session_state.recommended_handoff_text = generate_recommended_handoff_text(st.session_state.analysis_result)
+            if st.button("直接按要求重写当前文档", use_container_width=True, key=f"revise_{role}"):
+                with st.spinner("AI 正在重写文档..."):
+                    result = build_agent(role).revise(st.session_state.analysis, current_doc, feedback)
+                st.session_state.docs[role] = result
+                st.session_state.feedback_history[role].append({"type": "revision", "content": f"已根据反馈重写 {ROLE_LABELS[role]} 文档。"})
                 st.rerun()
 
+        history = st.session_state.feedback_history.get(role, [])
+        if history:
+            st.markdown("**协作记录**")
+            for item in history[::-1]:
+                with st.expander("修改建议" if item["type"] == "suggestion" else "修订记录", expanded=False):
+                    st.markdown(item["content"])
 
-# ---------- stage 3 ----------
-else:
-    analysis = st.session_state.analysis_result
-    ready, missing = get_gate_status(analysis)
-
-    top_left, top_right = st.columns([1.0, 0.9], gap="large")
-    with top_left:
-        st.markdown('<div class="card"><h3>交接单已确认</h3><p>现在这份内容会作为五个角色的统一输入基础。</p></div>', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="summary-grid">'
-            f'<div class="kv"><div class="label">需求目标</div><div class="value">{format_output(analysis.get("goal", "未明确"))}</div></div>'
-            f'<div class="kv"><div class="label">目标用户</div><div class="value">{format_output(analysis.get("users", []))}</div></div>'
-            f'<div class="kv"><div class="label">核心场景</div><div class="value">{format_output(analysis.get("core_scenarios", []))}</div></div>'
-            f'<div class="kv"><div class="label">核心功能</div><div class="value">{format_output(analysis.get("core_features", []))}</div></div>'
-            f'</div>',
-            unsafe_allow_html=True,
+    with tab3:
+        st.caption("你可以直接在表里编辑任务安排。")
+        edited = st.data_editor(
+            st.session_state.task_table,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="task_editor",
+            column_config={
+                "状态": st.column_config.SelectboxColumn("状态", options=["待开始", "进行中", "已完成", "阻塞"])
+            },
         )
-
-    with top_right:
-        next_text = "你可以现在生成各部门文档。"
-        if missing:
-            next_text = "当前仍有缺失项，但你也可以继续生成；各角色输出会保留【需产品补充确认】提示。"
-        st.markdown(
-            f'''
-            <div class="assistant">
-                <div class="assistant-tag">AI 助理</div>
-                <h4>下一步</h4>
-                <div class="assistant-body">{next_text}</div>
-            </div>
-            ''',
-            unsafe_allow_html=True,
+        st.session_state.task_table = edited
+        st.download_button(
+            "下载任务表 CSV",
+            data=edited.to_csv(index=False).encode("utf-8-sig"),
+            file_name="project_tasks.csv",
+            mime="text/csv",
         )
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("生成各部门需求文档", type="primary", use_container_width=True):
-                with st.spinner("各角色 Agent 正在协作输出…"):
-                    run_generation(st.session_state.final_requirement, analysis)
-                st.rerun()
-        with c2:
-            if st.button("返回修改交接单", use_container_width=True):
-                st.session_state.handoff_confirmed = False
-                st.rerun()
-
-    if st.session_state.generation_done and st.session_state.results:
-        st.markdown('<div class="result-shell">', unsafe_allow_html=True)
-        st.markdown("### 各部门需求文档")
-        results = st.session_state.results
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["研发", "设计", "算法", "测试", "运营", "风险"])
-
-        with tab1:
-            content = format_output(results.get("engineering"))
-            st.markdown(content)
-            st.download_button("下载研发版本", data=content, file_name="engineering_requirement.md", mime="text/markdown")
-        with tab2:
-            content = format_output(results.get("design"))
-            st.markdown(content)
-            st.download_button("下载设计版本", data=content, file_name="design_requirement.md", mime="text/markdown")
-        with tab3:
-            content = format_output(results.get("ai"))
-            st.markdown(content)
-            st.download_button("下载算法版本", data=content, file_name="ai_requirement.md", mime="text/markdown")
-        with tab4:
-            content = format_output(results.get("qa"))
-            st.markdown(content)
-            st.download_button("下载测试版本", data=content, file_name="qa_requirement.md", mime="text/markdown")
-        with tab5:
-            content = format_output(results.get("operation"))
-            st.markdown(content)
-            st.download_button("下载运营版本", data=content, file_name="operation_requirement.md", mime="text/markdown")
-        with tab6:
-            risk = results.get("risk", {})
-            if isinstance(risk, dict):
-                if risk.get("unclear_expressions"):
-                    st.warning("表达不够明确")
-                    for item in risk["unclear_expressions"]:
-                        st.write(f"- {item}")
-                if risk.get("needs_supplement"):
-                    st.info("需要补充的信息")
-                    for item in risk["needs_supplement"]:
-                        st.write(f"- {item}")
-                if risk.get("cross_dept_risks"):
-                    st.error("跨部门理解偏差风险")
-                    for item in risk["cross_dept_risks"]:
-                        st.write(f"- {item}")
-                if risk.get("next_steps"):
-                    st.success("建议的下一步")
-                    for item in risk["next_steps"]:
-                        st.write(f"- {item}")
-                st.markdown("---")
-                st.markdown(format_output(risk))
-                st.download_button("下载风险分析", data=format_output(risk), file_name="risk_analysis.md", mime="text/markdown")
-            else:
-                st.markdown(format_output(risk))
-        st.markdown("</div>", unsafe_allow_html=True)
